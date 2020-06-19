@@ -13,6 +13,11 @@ import { CollectionChangeTypes } from './common'
 const mockQuery = collection => new Query(collection, [Q.where('a', 'b')])
 
 describe('Collection', () => {
+  it(`exposes database`, () => {
+    const { db, projects } = mockDatabase()
+    expect(projects.database).toBe(db)
+    expect(projects.db).toBe(db)
+  })
   it('exposes schema', () => {
     const { tasks, projects } = mockDatabase()
 
@@ -75,6 +80,12 @@ describe('finding records', () => {
     await expect(collection.find('m1')).rejects.toBeInstanceOf(Error)
 
     expect(findSpy.mock.calls.length).toBe(2)
+  })
+  it('quickly rejects for invalid IDs', async () => {
+    const { tasks } = mockDatabase()
+    await expectToRejectWithMessage(tasks.find(), /Invalid record ID/)
+    await expectToRejectWithMessage(tasks.find(null), /Invalid record ID/)
+    await expectToRejectWithMessage(tasks.find({}), /Invalid record ID/)
   })
 })
 
@@ -277,5 +288,25 @@ describe('Collection observation', () => {
     expect(subscriber1).toHaveBeenCalledTimes(1)
 
     unsubscribe1()
+  })
+  it(`can subscribe with the same subscriber multiple times`, async () => {
+    const { database, tasks } = mockDatabase({ actionsEnabled: true })
+    const trigger = () => database.action(() => tasks.create())
+    const subscriber = jest.fn()
+
+    const unsubscribe1 = tasks.experimentalSubscribe(subscriber)
+    expect(subscriber).toHaveBeenCalledTimes(0)
+    await trigger()
+    expect(subscriber).toHaveBeenCalledTimes(1)
+    const unsubscribe2 = tasks.experimentalSubscribe(subscriber)
+    await trigger()
+    expect(subscriber).toHaveBeenCalledTimes(3)
+    unsubscribe2()
+    unsubscribe2() // noop
+    await trigger()
+    expect(subscriber).toHaveBeenCalledTimes(4)
+    unsubscribe1()
+    await trigger()
+    expect(subscriber).toHaveBeenCalledTimes(4)
   })
 })

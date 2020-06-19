@@ -72,6 +72,10 @@ To simply get the current list or current count, use `fetch` / `fetchCount`. You
 ```js
 const comments = await post.comments.fetch()
 const verifiedCommentCount = await post.verifiedComments.fetchCount()
+
+// Shortcut syntax:
+const comments = await post.comments
+const verifiedCommentCount = await post.verifiedComments.count
 ```
 
 ## Query conditions
@@ -200,6 +204,30 @@ commentCollection.query(
   Q.where('likes', Q.gt(Q.column('dislikes')))
 )
 ```
+
+### sortBy, take, skip
+
+When using SQLite adapter, you can use these *experimental* clauses to sort the result of the query and to limit the number of results
+
+```js
+commentCollection.query(
+  Q.experimentalSortBy('likes', Q.asc), // sorts ascending by `likes`
+  Q.experimentalSkip(100),
+  Q.experimentalTake(100),
+)
+```
+
+**NOTE**: This does not currently work on web/LokiJS (please contribute!), and causes query observation to fall back to a less efficient method. We recommend using sortBy only when you absolutely need to limit queries, otherwise, it may be better to sort in JavaScript.
+
+### Security
+
+Remember that Queries are a sensitive subject, security-wise. Never trust user input and pass it directly into queries. In particular:
+
+- Never pass into queries values you don't know for sure are the right type (e.g. value passed to `Q.eq()` should be a string, number, boolean, or null -- but not an Object. If the value comes from JSON, you must validate it before passing it!)
+- Never pass column names (without whitelisting) from user input
+- Values passed to `oneOf`, `notIn` should be arrays of simple types - be careful they don't contain objects
+- Do not use `Q.like` / `Q.notLike` without `Q.sanitizeLikeString`
+- Do not use `unsafe raw queries` without knowing what you're doing and sanitizing all user input
 
 ### Raw Queries
 

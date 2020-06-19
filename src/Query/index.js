@@ -14,7 +14,7 @@ import subscribeToCount from '../observation/subscribeToCount'
 import subscribeToQuery from '../observation/subscribeToQuery'
 import subscribeToQueryWithColumns from '../observation/subscribeToQueryWithColumns'
 import { buildQueryDescription, queryWithoutDeleted } from '../QueryDescription'
-import type { Condition, QueryDescription } from '../QueryDescription'
+import type { Clause, QueryDescription } from '../QueryDescription'
 import type Model, { AssociationInfo } from '../Model'
 import type Collection from '../Collection'
 import type { TableName, ColumnName } from '../Schema'
@@ -27,6 +27,13 @@ export type SerializedQuery = $Exact<{
   description: QueryDescription,
   associations: AssociationArgs[],
 }>
+
+interface QueryCountProxy {
+  then<U>(
+    onFulfill?: (value: number) => Promise<U> | U,
+    onReject?: (error: any) => Promise<U> | U,
+  ): Promise<U>;
+}
 
 export default class Query<Record: Model> {
   collection: Collection<Record>
@@ -51,18 +58,25 @@ export default class Query<Record: Model> {
   )
 
   // Note: Don't use this directly, use Collection.query(...)
-  constructor(collection: Collection<Record>, conditions: Condition[]): void {
+  constructor(collection: Collection<Record>, clauses: Clause[]): void {
     this.collection = collection
-    this._rawDescription = buildQueryDescription(conditions)
+    this._rawDescription = buildQueryDescription(clauses)
     this.description = queryWithoutDeleted(this._rawDescription)
   }
 
-  // Creates a new Query that extends the conditions of this query
-  extend(...conditions: Condition[]): Query<Record> {
+  // Creates a new Query that extends the clauses of this query
+  extend(...clauses: Clause[]): Query<Record> {
     const { collection } = this
-    const { join, where } = this._rawDescription
+    const { join, where, sortBy, take, skip } = this._rawDescription
 
-    return new Query(collection, [...join, ...where, ...conditions])
+    return new Query(collection, [
+      ...join,
+      ...where,
+      ...sortBy,
+      ...(take ? [take] : []),
+      ...(skip ? [skip] : []),
+      ...clauses,
+    ])
   }
 
   pipe<T>(transform: this => T): T {
@@ -72,6 +86,14 @@ export default class Query<Record: Model> {
   // Queries database and returns an array of matching records
   fetch(): Promise<Record[]> {
     return toPromise(callback => this.collection._fetchQuery(this, callback))
+  }
+
+  then<U>(
+    onFulfill?: (value: Record[]) => Promise<U> | U,
+    onReject?: (error: any) => Promise<U> | U,
+  ): Promise<U> {
+    // $FlowFixMe
+    return this.fetch().then(onFulfill, onReject)
   }
 
   // Emits an array of matching records, then emits a new array every time it changes
@@ -96,6 +118,19 @@ export default class Query<Record: Model> {
   // Returns the number of matching records
   fetchCount(): Promise<number> {
     return toPromise(callback => this.collection._fetchCount(this, callback))
+  }
+
+  get count(): QueryCountProxy {
+    const model = this
+    return {
+      then<U>(
+        onFulfill?: (value: number) => Promise<U> | U,
+        onReject?: (error: any) => Promise<U> | U,
+      ): Promise<U> {
+        // $FlowFixMe
+        return model.fetchCount().then(onFulfill, onReject)
+      },
+    }
   }
 
   // Emits the number of matching records, then emits a new count every time it changes
@@ -160,7 +195,7 @@ export default class Query<Record: Model> {
     return getAssociations(this.secondaryTables, this.modelClass.associations)
   }
 
-  // `true` if query contains conditions on foreign tables
+  // `true` if query contains join clauses on foreign tables
   get hasJoins(): boolean {
     return !!this.description.join.length
   }

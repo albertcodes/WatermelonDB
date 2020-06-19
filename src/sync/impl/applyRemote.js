@@ -10,7 +10,7 @@ import {
   splitEvery,
 } from 'rambdax'
 import { unnest } from '../../utils/fp'
-import { logError, invariant } from '../../utils/common'
+import { logError, invariant, logger } from '../../utils/common'
 import type { Database, RecordId, Collection, Model, TableName, DirtyRaw } from '../..'
 import * as Q from '../../QueryDescription'
 import { columnName } from '../../Schema'
@@ -163,15 +163,20 @@ const getAllRecordsToApply = (
 ): AllRecordsToApply =>
   piped(
     remoteChanges,
-    map((changes, tableName: TableName<any>) => {
-      const collection = db.collections.get((tableName: any))
+    // $FlowFixMe
+    filter((_changes, tableName: TableName<any>) => {
+      const collection = db.get((tableName: any))
 
       if (!collection) {
-        return Promise.reject(new Error(`You are trying to sync a collection named ${tableName}, but currently this collection does not exist.` + 
-        `Have you remembered to add it to your Database constructor\'s modelClasses property?`))
+        logger.warn(
+          `You are trying to sync a collection named ${tableName}, but it does not exist. Will skip it (for forward-compatibility). If this is unexpected, perhaps you forgot to add it to your Database constructor's modelClasses property?`,
+        )
       }
-      
-      return recordsToApplyRemoteChangesTo(collection, changes)
+
+      return !!collection
+    }),
+    map((changes, tableName: TableName<any>) => {
+      return recordsToApplyRemoteChangesTo(db.get((tableName: any)), changes)
     }),
     promiseAllObject,
   )
@@ -197,7 +202,7 @@ const prepareApplyAllRemoteChanges = (
     recordsToApply,
     map((records, tableName: TableName<any>) =>
       prepareApplyRemoteChangesToCollection(
-        db.collections.get((tableName: any)),
+        db.get((tableName: any)),
         records,
         sendCreatedAsUpdated,
         log,
@@ -248,11 +253,8 @@ export default function applyRemoteChanges(
       destroyAllDeletedRecords(db, recordsToApply),
       ...(_unsafeBatchPerCollection
         ? unsafeBatchesWithRecordsToApply(db, recordsToApply, sendCreatedAsUpdated, log)
-        : [
-            db.batch(
-              ...prepareApplyAllRemoteChanges(db, recordsToApply, sendCreatedAsUpdated, log),
-            ),
-          ]),
+        : // $FlowFixMe
+          [db.batch(prepareApplyAllRemoteChanges(db, recordsToApply, sendCreatedAsUpdated, log))]),
     ])
   }, 'sync-applyRemoteChanges')
 }
